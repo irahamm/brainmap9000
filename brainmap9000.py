@@ -20,7 +20,14 @@ areas = areas.replace("-", " ")
 # CREATE THE GRAPH OBJECT
 topG = nx.MultiDiGraph()
 # FILL IN THE AREAS\NODES
-for i in range(len(areas)):
+'''
+Explanation about the nodes file:
+The nodes file is a text file which is written hierarchically, in such a way that each area that is found within the 
+square brackets which follow after another area, is considered to be contained within that area. 
+For example: this syntax Brain[[Forebrain][Midbrain][Hindbrain]] means that the Forebrain, the Midbrain and the
+Hindbrain are all part of the Brain region. 
+'''
+for i in range(len(areas)):   # this loop iterates over the nodes\brain areas and adds them into the graph object
     if i == 0:
         last_s = 0
         regions = []
@@ -45,15 +52,22 @@ for i in range(len(areas)):
         # anyhow de-update regions
         regions.pop()
 
-# create neurotransmitter palette
+# create neurotransmitter palette. this will later determine the color of the arrow heads of each neurotransmitter.
 n_ts_palette = {
     'idk': QColor(0, 0, 0), 'GABA(-)': QColor(200, 0, 0),
     'Glutamate(+)': QColor(0, 150, 0)
 }
 
 # ADD THE TRACTS\EDGES TO THE GRAPH
-for i in range(tracts.shape[0]):
-    j=1
+'''
+Explanation about the tracts file:
+The tracts file is a csv containing known pathways. Notable variables within this csv include the tracts name, it's 
+beginning and it's stops. If a given stage diverges from an area to more then one area, '\\' is used between the
+afferent areas. Also, to signify the efferent neuron's neurotransmitter (if known), '@' is used at the end of the
+receiving stop. 
+'''
+for i in range(tracts.shape[0]):  # this loop iterates over the tracts file and adds the edges to the graph object
+    j = 1
     current_area = tracts["beginning"][i]
     # add the edge
     while isinstance(tracts[f"stop{j}"][i], str):
@@ -61,7 +75,6 @@ for i in range(tracts.shape[0]):
         exit_loop = False
         current_areas = current_area.split(r"\\")
         next_areas = next_area.split(r"\\")  # split these stops into a list
-        # s = s[:-1]+s[-1].split("@")
         if '@' in current_areas[-1]:
             current_areas = current_areas[:-1] + current_areas[-1].split("@")
             neuro_ts = current_areas[-1]
@@ -93,7 +106,7 @@ for i in range(tracts.shape[0]):
         j += 1
 
 
-# LOAD THE VECTOR GRAPHIC PATHS (in order hovering and other functionalities later on)
+# LOAD THE VECTOR GRAPHIC PATHS (in order to enable hovering and other functionalities later on)
 def extract_svg_paths(svg_file):   # this function takes in and SVG file and extracts the paths of all labeled items
     tree = ET.parse(svg_file)
     root = tree.getroot()
@@ -120,12 +133,12 @@ svg_paths = extract_svg_paths(svg_file)
 # this function converts SVG paths into QPainterPaths
 def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO ALL SVG COMMANDS MATE
     painter_path = QPainterPath()
-    # handle transfroming
+    # handle transforming
     if tr is None:
         tr = 1.0
     else:
         tr = float(tr.strip("scale()"))
-    # if it's an absolute path change its format
+    # split the path into lines following each command
     svg_path = svg_path.replace(" M", "\nM")
     svg_path = svg_path.replace(" m", "\nm")
     svg_path = svg_path.replace(" c", "\nc")
@@ -139,6 +152,7 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
     svg_path = svg_path.replace(" a", "\na")
     svg_path = svg_path.replace(" z", "\nz")
     svg_path = svg_path.splitlines()
+    # if it's an absolute path change its format
     if 'M' in svg_path[0]:
         space_counter = 0
         result = []
@@ -153,7 +167,7 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
                 else:
                     result.append(char)
         svg_path = "".join(result)
-        # do it again, i know, stupid
+        # do it again (I know, stupid)
         svg_path = svg_path.replace("M", "\nM")
         svg_path = svg_path.replace("m", "\nm")
         svg_path = svg_path.replace("c", "\nc")
@@ -169,8 +183,8 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
     else:
         # replace first m with M
         svg_path[0] = svg_path[0].replace("m", "M")
-    #print(svg_path)
     start_coords = (0, 0)
+    # iterate over the path's commands and translate each command into an appropriate QPainterPath move
     for comm in svg_path:
         data = comm[2:]
         if comm[0] == "M" or comm[0] == "m":
@@ -179,8 +193,6 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
             for i in range(len(data)):
                 if i == 0:
                     if comm[0] == "M":  # absolute move
-                        #print(data)
-                        #print(float(data[i][0:(data[i].index(",") - 1)]))
                         painter_path.moveTo(tr*float(data[i][0:(data[i].index(","))]),
                                             tr*float(data[i][(data[i].index(",") + 1):]))
                         start_coords = (tr*float(data[i][0:(data[i].index(","))]), tr*float(data[i][(data[i].index(",") + 1):]))
@@ -189,8 +201,7 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
                                             tr*float(data[i][(data[i].index(",") + 1):]) + start_coords[1])
                         start_coords = (tr*float(data[i][0:(data[i].index(","))]) + start_coords[0],
                                         tr*float(data[i][(data[i].index(",") + 1):]) + start_coords[1])
-                else:                 # Any subsequents are relative lineTos
-                    #print(data)
+                else:                 # any subsequents are relative lineTos
                     painter_path.lineTo(tr*float(data[i][0:(data[i].index(","))]) + start_coords[0],
                                         tr*float(data[i][(data[i].index(",") + 1):]) + start_coords[1])
                     start_coords = (tr*float(data[i][0:(data[i].index(","))]) + start_coords[0],
@@ -266,7 +277,6 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
                 dest_y = start_coords[1] + dy * tr
                 center_x = (start_coords[0] + dest_x) / 2
                 center_y = (start_coords[1] + dest_y) / 2
-                #bounding_rect = QRectF(center_x - rx * tr, center_y - ry * tr, rect_width, rect_height)
 
                 start_angle = i*0
                 sweep_length = 360
@@ -279,12 +289,12 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
             start_coords = (painter_path.currentPosition().x(), painter_path.currentPosition().y())  # LOLLLL got to change this later
     return painter_path
 
-
+# PREPARE FOR CONVERTING THE SVG PATHS, GETTING THEIR CENTERS, AND CREATING ARROW OBJECTS FOR THE EDGES
 painter_paths = []
 path_centers = []
 number_of_subpaths = {}
 lines = []
-# gather paths
+# GATHER PATHS
 for name, path, transform in svg_paths:
     try:
         painter_paths.append((name, svgpathTOqpainterpath(path, transform)))
@@ -321,6 +331,9 @@ def find_meatiest_center(path: QPainterPath, num_of_subrecs: int) -> QPointF:
     high_rec_areas = []
     high_centers = []
     high_recs = []
+    # the following will 'divide' the path and its 'background' to sub rectangles throughout the x-axis (resulting in
+    # thin, high rectangles). then, the meatiest X will be determined as that of the middle point of the rectangle which
+    # is maximally filled by the part of the path which is bounded by it.
     for i in range(num_of_subrecs):
         high_rec_i = QPainterPath()
         high_rec_i.addRect(QRectF(x + width/num_of_subrecs * i, y, width / num_of_subrecs, height))
@@ -355,30 +368,16 @@ def find_meatiest_center(path: QPainterPath, num_of_subrecs: int) -> QPointF:
 
 # DETERMINING THE PATH CENTERS (I.E. THE COORDINATE IN WHICH OUTPUT ARROW WILL START AND INPUT ARROW WILL END)
 # first gather number of subpaths for each path
-#for name, path, transform in svg_paths:
-#    number_of_subpaths[name] = path.count("m")  # this way is redundant
-# very dumb way of doing it
-for name, path in painter_paths:
-    number_of_subpaths[name] = len(path.toSubpathPolygons())
 # now gather the centers
 for name, path in painter_paths:
     if name in topG.nodes:
-        if number_of_subpaths[name] > 1:
+        if len(path.toSubpathPolygons()) > 1:   # if the path has more than one sub polygon
             # choose the bigger polygon
             subpaths = []
             for polygon in path.toSubpathPolygons():
                 subpath = QPainterPath()
                 subpath.addPolygon(polygon)
                 subpaths.append((subpath, calculate_path_area(subpath)))
-            #print(name,subpaths)
-            '''
-            if [x[1] for x in subpaths].count(max([x[1] for x in subpaths])) == 2:
-                left_sp = [x[0] for x in subpaths if x[0].boundingRect().x()<path.boundingRect().x()+path.boundingRect().width()//2][0]
-                output = find_meatiest_center(left_sp, 20)
-            else:
-                output = find_meatiest_center(sorted(subpaths, key=lambda x: x[1], reverse=True)[0][0], 20)
-            topG.nodes[name]['pos'] = (output.x(), output.y())
-            '''
             if len(subpaths) % 2 == 0:
                 ratios = [subpaths[i][1]/subpaths[0][1] for i in range(len(subpaths))]
                 if all(1.5 > rat > 0.92 for rat in ratios):
@@ -389,17 +388,11 @@ for name, path in painter_paths:
                 output = find_meatiest_center(sorted(subpaths, key=lambda x: x[1], reverse=True)[0][0], 20)
 
             topG.nodes[name]['pos'] = (output.x(), output.y())
-
-
-            #topG.nodes[name]['pos'] = (first_subpath.boundingRect().x() + first_subpath.boundingRect().width() / 2, first_subpath.boundingRect().y() + first_subpath.boundingRect().height() / 2)
         else:
             output = find_meatiest_center(path, 20)
             topG.nodes[name]['pos'] = (output.x(), output.y())
-            #topG.nodes[name]['pos'] = (path.boundingRect().x() + path.boundingRect().width() / 2, path.boundingRect().y() + path.boundingRect().height() / 2)
-
-# gather lines - we use a name_of_tract, start, end, line item tuple
-# some silly shit
-edges = []
+# GATHER EDGES - we use a name_of_tract, start, end, line item tuple
+edges = []  # this will be useful later on
 for edge in topG.edges:
     try:
         lines.append((topG.edges[edge]['name'], f"{edge[0]}", f"{edge[1]}", topG.edges[edge]['neuro_trs'], QLineF(topG.nodes[edge[0]]['pos'][0], topG.nodes[edge[0]]['pos'][1],
@@ -409,8 +402,7 @@ for edge in topG.edges:
         print(f"one or more of these nodes doesnt have a place on the map: {edge}")
 
 
-
-# make lines the into arrows using this silly ol thing
+# make the lines into arrows using this class:
 class MyArrow(QPainterPath):
     def __init__(self, x1, y1, x2, y2, arrow_size=12):
         super().__init__()
@@ -454,7 +446,7 @@ class MyArrow(QPainterPath):
         self.closeSubpath()
 
 
-
+# this loop makes the lines into arrows
 lines_of_area_buttons = []
 for i in range(len(lines)):
     lines_of_area_buttons.append((lines[i][0], lines[i][1], lines[i][2], lines[i][3],
@@ -531,7 +523,7 @@ class CustomArrowPathItem(QGraphicsPathItem):      # class for the edges
         painter.setBrush(self.brush())
         painter.drawPath(self.scaled_path)
 
-    def shape(self):   # isn't it kind of silly we calculate it inside the method?
+    def shape(self):
         # create a path that is wider than the actual line by adding a larger stroke
         copied_path = QPainterPath(self.path)
 
@@ -601,7 +593,7 @@ class LeftAlignedPressableLabel_tract(QLabel):
             for arrow in self.region:
                 arrow.show()
             self.setStyleSheet("background-color: rgba(173, 216, 255, 1)")
-        else:  # copy code like a maniac
+        else:  # (copy code like a maniac)
             for arrow in self.region:
                 arrow.hide()
             self.setStyleSheet("""
@@ -643,11 +635,9 @@ class LeftAlignedPressableLabel_area(QLabel):
         self.toggle = False
 
     def add_input(self, inp):
-        print(f"Adding input arrow to {self.text()}: {inp.title}")
         self.inputs.append(inp)
 
     def add_output(self, out):
-        print(f"Adding output arrow to {self.text()}: {out.title}")
         self.outputs.append(out)
 
     def pressed(self, event):
@@ -673,7 +663,7 @@ class LeftAlignedPressableLabel_area(QLabel):
                             """)
 
 
-# we make custom graphics view class in order to enable zooming
+# we make a custom graphics view class in order to enable zooming
 class CustomGraphicsView(QGraphicsView):
     def __init__(self, scene):
         super().__init__(scene)
@@ -748,6 +738,7 @@ class ColorPal(QWidget):
         self.setStyleSheet(f"background-color: {color.name()};")
 
 
+# DEFINE THE MAIN WINDOW
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -766,13 +757,18 @@ class MainWindow(QMainWindow):
         pen.setWidth(1)
         # load ze svg
         svg_map = QGraphicsSvgItem("MAP_1.svg")
-        svg_map.setScale(0.28225)  # WHY this number? some "DPI" related difference? (so long as we don't figure this out, the project isn't generlizable)
+        '''
+        IMPORTANT- I figured out the following scale number numerically and I still didn't find out why it might be a
+        DPI related difference between the way QPainterPaths load and how an SVG item loads. 
+        # This is important because until this is not figured out the project CANNOT generalize to any other map.
+        '''
+        svg_map.setScale(0.28225)
         g_scene.addItem(svg_map)
-        # load ze vayz
+        # use the paths to create instance of our custom graphicsitem class
         self.path_items = []
         for name, path in painter_paths:
-            self.path_items.append(CustomPathItem(path,self.text_disp, name))
-        # drawwwww
+            self.path_items.append(CustomPathItem(path, self.text_disp, name))
+        # add the paths to the scene
         for path_item in self.path_items:
             path_item.setPen(pen)
             path_item.setBrush(QColor(0, 0, 0, 0))
@@ -852,8 +848,7 @@ class MainWindow(QMainWindow):
             # inputs and outputs
             inputs = topG.in_edges(node)
             outputs = topG.out_edges(node)
-            # using set here might cause problems in displaying two identical arrows at once
-            # (but we also haven't decided on how to remedy this issue)
+
             inputs = list(set(inputs).intersection(edges))
             outputs = list(set(outputs).intersection(edges))
             input_arrows = []
@@ -899,7 +894,6 @@ class MainWindow(QMainWindow):
         # add the tabs (tracts first)
         self.tabs.addTab(self.scroll_area2, "Tracts")
         self.tabs.addTab(self.scroll_area, "Areas")
-        #self.setCentralWidget(self.tabs)
         layout3 = QHBoxLayout()
         layout3.addWidget(self.tabs)
         layout3.addWidget(frame)
