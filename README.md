@@ -15,4 +15,6 @@ Attributions include:
 
 'The nuclei of the Modulatory network.png', Anand Venkatraman, Brian L. Edlow, and Mary Helen Immordino-Yang, https://commons.wikimedia.org/wiki/File:The_nuclei_of_the_Modulatory_network.png (doi: https://doi.org/10.3389/fnana.2017.00015), Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/)
 
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
 The map was drawn using Inkscape.
