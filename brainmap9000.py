@@ -1,7 +1,7 @@
 import sys
 import os
 from PyQt5.QtSvg import QGraphicsSvgItem
-from PyQt5.QtGui import QPen, QFont, QColor, QPainterPath, QPainterPathStroker, QPolygonF
+from PyQt5.QtGui import QPen, QFont, QColor, QPainterPath, QPainterPathStroker, QPolygonF, QFontMetrics, QPixmap, QPainter, QIcon
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, QPointF, QLineF, QRectF, QSize, QVariantAnimation, pyqtSignal, QTimer
 import networkx as nx
@@ -78,8 +78,18 @@ The tracts file is a csv containing known pathways. Notable variables within thi
 beginning and it's stops. If a given stage diverges from an area to more then one area, '\\' is used between the
 afferent areas. Also, to signify the efferent neuron's neurotransmitter (if known), '@' is used at the end of the
 receiving stop. 
+Another symbol used is the '#' symbol. It is used for pathways which are made of existing pathways. Specifically, it
+means that every pathway which includes the expression after the hashtag as one of it's categories, will be assigned as
+part of this pathway.
 '''
-for i in range(tracts.shape[0]):  # this loop iterates over the tracts file and adds the edges to the graph object
+# to later deal with said 'composite' pathways we first set up a dictionary
+composite_paths = {}
+for i, item in enumerate(tracts["beginning"]):
+    if isinstance(item, str) and "#" in item:
+        # I put it in an 'name, beginning'
+        composite_paths[(tracts["tract name"][i], item.strip("#"))] = []
+# this loop iterates over the tracts file and adds the edges to the graph object
+for i in range(tracts.shape[0]):
     j = 1
     current_area = tracts["beginning"][i]
     # add the edge
@@ -110,14 +120,15 @@ for i in range(tracts.shape[0]):  # this loop iterates over the tracts file and 
             break
         if exit_loop:
             break
+        categories = [cat for cat in tracts.loc[i, "category1":"category5"] if isinstance(cat, str)]
         # else connect any current area with any next area
         for ar0 in current_areas:
             for ar1 in next_areas:
-                topG.add_edge(ar0, ar1, name=str(tracts["tract name"][i]) + f" ({j})", neuro_trs=neuro_ts)
+                topG.add_edge(ar0, ar1, name=str(tracts["tract name"][i]) + f" ({j})", neuro_trs=neuro_ts,
+                              categories=categories)
         # update current area
         current_area = tracts[f"stop{j}"][i]
         j += 1
-
 
 # LOAD THE VECTOR GRAPHIC PATHS (in order to enable hovering and other functionalities later on)
 def extract_svg_paths(svg_file):   # this function takes in and SVG file and extracts the paths of all labeled items
@@ -299,7 +310,7 @@ def svgpathTOqpainterpath(svg_path:str, tr):  # IMPORTANT - MAKE THIS ROBUST TO 
                 start_coords = (dest_x, dest_y)
         elif comm[0] == "z":
             painter_path.closeSubpath()
-            start_coords = (painter_path.currentPosition().x(), painter_path.currentPosition().y())  # LOLLLL got to change this later
+            start_coords = (painter_path.currentPosition().x(), painter_path.currentPosition().y())
     return painter_path
 
 # PREPARE FOR CONVERTING THE SVG PATHS, GETTING THEIR CENTERS, AND CREATING ARROW OBJECTS FOR THE EDGES
@@ -394,7 +405,7 @@ for name, path in painter_paths:
             if len(subpaths) % 2 == 0:
                 ratios = [subpaths[i][1]/subpaths[0][1] for i in range(len(subpaths))]
                 if all(1.5 > rat > 0.92 for rat in ratios):
-                    output = find_meatiest_center(sorted(subpaths, key=lambda x: x[0].boundingRect().x(),reverse=True)[0][0], 20)
+                    output = find_meatiest_center(sorted(subpaths, key=lambda x: x[0].boundingRect().x(), reverse=True)[0][0], 20)
                 else:
                     output = find_meatiest_center(sorted(subpaths, key=lambda x: x[1], reverse=True)[0][0], 20)
             else:
@@ -404,12 +415,12 @@ for name, path in painter_paths:
         else:
             output = find_meatiest_center(path, 20)
             topG.nodes[name]['pos'] = (output.x(), output.y())
-# GATHER EDGES - we use a name_of_tract, start, end, line item tuple
+# GATHER EDGES
 edges = []  # this will be useful later on
 for edge in topG.edges:
     try:
-        lines.append((topG.edges[edge]['name'], f"{edge[0]}", f"{edge[1]}", topG.edges[edge]['neuro_trs'], QLineF(topG.nodes[edge[0]]['pos'][0], topG.nodes[edge[0]]['pos'][1],
-                            topG.nodes[edge[1]]['pos'][0], topG.nodes[edge[1]]['pos'][1])))
+        lines.append((edge, QLineF(topG.nodes[edge[0]]['pos'][0], topG.nodes[edge[0]]['pos'][1],
+                                   topG.nodes[edge[1]]['pos'][0], topG.nodes[edge[1]]['pos'][1])))
         edges.append((edge[0], edge[1]))
     except KeyError:
         print(f"one or more of these nodes doesnt have a place on the map: {edge}")
@@ -419,23 +430,15 @@ for edge in topG.edges:
 class MyArrow(QPainterPath):
     def __init__(self, x1, y1, x2, y2, arrow_size=12):
         super().__init__()
-        # Save the points and constrain the arrow size
+        # save the points and constrain the arrow size
         self.p1 = (x1, y1)
         self.p2 = (x2, y2)
         self.arrow_size = max(3, min(arrow_size, 30))
 
-        # Calculate the angle of the line
+        # calculate the angle of the line
         angle = math.atan2(self.p2[1] - self.p1[1], self.p2[0] - self.p1[0])
 
-        # Calculate the endpoint of the line before the arrowhead
-        #line_end_x = self.p2[0] - self.arrow_size * math.cos(angle)
-        #line_end_y = self.p2[1] - self.arrow_size * math.sin(angle)
-
-        # Draw the line up to where the arrowhead starts
-        #self.moveTo(x1, y1)
-        #self.lineTo(line_end_x, line_end_y)
-
-        # Calculate the points for the arrowhead
+        # calculate the points for the arrowhead
         arrow_p1 = QPointF(
             self.p2[0] - self.arrow_size * math.cos(angle - math.pi / 6),
             self.p2[1] - self.arrow_size * math.sin(angle - math.pi / 6)
@@ -447,9 +450,8 @@ class MyArrow(QPainterPath):
 
         midpoint_x = (arrow_p1.x() + arrow_p2.x()) / 2
         midpoint_y = (arrow_p1.y() + arrow_p2.y()) / 2
-        midpoint = QPointF(midpoint_x, midpoint_y)
 
-        # Draw the arrowhead as a triangle
+        # draw the arrowhead as a triangle
         self.moveTo(self.p1[0], self.p1[1])
         self.lineTo(midpoint_x, midpoint_y)
         self.lineTo(arrow_p1)
@@ -462,10 +464,10 @@ class MyArrow(QPainterPath):
 # this loop makes the lines into arrows
 lines_of_area_buttons = []
 for i in range(len(lines)):
-    lines_of_area_buttons.append((lines[i][0], lines[i][1], lines[i][2], lines[i][3],
-                                  MyArrow(lines[i][4].x1(), lines[i][4].y1(), lines[i][4].x2(), lines[i][4].y2())))
-    lines[i] = (lines[i][0], lines[i][1], lines[i][2], lines[i][3],
-                MyArrow(lines[i][4].x1(), lines[i][4].y1(), lines[i][4].x2(), lines[i][4].y2()))
+    lines_of_area_buttons.append((lines[i][0],
+                                 MyArrow(lines[i][1].x1(), lines[i][1].y1(), lines[i][1].x2(), lines[i][1].y2())))
+    lines[i] = (lines[i][0], MyArrow(lines[i][1].x1(), lines[i][1].y1(), lines[i][1].x2(), lines[i][1].y2()))
+
 
 """
 PART B - DEFINE THE CLASSES
@@ -491,7 +493,7 @@ class CustomPathItem(QGraphicsPathItem):    # class for the areas
 
 
 class CustomArrowPathItem(QGraphicsPathItem):      # class for the edges
-    def __init__(self, path: MyArrow, label: QLabel, name: str, start: str, end: str, neuro_trs: str):
+    def __init__(self, path: MyArrow, label: QLabel, name: str, start: str, end: str, neuro_trs: str, categories=[]):
         super().__init__(path)
         self.setVisible(False)
         self.setAcceptHoverEvents(True)
@@ -510,7 +512,8 @@ class CustomArrowPathItem(QGraphicsPathItem):      # class for the edges
         self.path = path
         self.setBrush(n_ts_palette[neuro_trs])
         self.color = n_ts_palette[neuro_trs]
-        # in order for things to run smooth we want to set a QTimer
+        self.categories = categories
+        # in order for things to run smooth we set a QTimer
         self.hover_timer = QTimer()
         self.hover_timer.setSingleShot(True)  # Only trigger once
         self.hover_timer.timeout.connect(self.on_hover_timeout)
@@ -573,6 +576,10 @@ class CustomArrowPathItem(QGraphicsPathItem):      # class for the edges
 # custom QLabels that are aligned to the left - one class for arrows and one for areas
 # ARROWS
 class LeftAlignedPressableLabel_tract(QLabel):
+    # let's try to define a pyqt signal
+    off = pyqtSignal()
+    on = pyqtSignal()
+
     def __init__(self, text="", region=[]):
         self.region = region
         super().__init__(text)
@@ -591,21 +598,22 @@ class LeftAlignedPressableLabel_tract(QLabel):
                         background-color: lightblue;
                     }
                 """)
-        self.mousePressEvent = self.pressed
+        if self.region:
+            self.categories = region[0].categories
+        else:
+            self.categories=[]
         self.mouseReleaseEvent = self.released
         # create a toggle attribute
         self.toggle = False
 
-    def pressed(self, event):
-        pass
-
-    def released(self, event):
+    def released(self, event=None):
         # switch toggle
         self.toggle = not self.toggle
         if self.toggle:
             for arrow in self.region:
                 arrow.show()
             self.setStyleSheet("background-color: rgba(173, 216, 255, 1)")
+            self.on.emit()
         else:  # (copy code like a maniac)
             for arrow in self.region:
                 arrow.hide()
@@ -617,6 +625,7 @@ class LeftAlignedPressableLabel_tract(QLabel):
                                     background-color: lightblue;
                                 }
                             """)
+            self.off.emit()
 
 
 # AREAS
@@ -642,7 +651,6 @@ class LeftAlignedPressableLabel_area(QLabel):
                         background-color: lightblue;
                     }
                 """)
-        self.mousePressEvent = self.pressed
         self.mouseReleaseEvent = self.released
         # create a toggle attribute
         self.toggle = False
@@ -652,9 +660,6 @@ class LeftAlignedPressableLabel_area(QLabel):
 
     def add_output(self, out):
         self.outputs.append(out)
-
-    def pressed(self, event):
-        pass
 
     def released(self, event):
         # switch toggle
@@ -674,6 +679,90 @@ class LeftAlignedPressableLabel_area(QLabel):
                                     background-color: lightblue;
                                 }
                             """)
+# A CLASS FOR TRACT BUTTONS WHICH ARE A GROUP OF EXISTING TRACT BUTTONS
+class LeftAlignedPressableLabel_composite_tract(QLabel):
+    def __init__(self, text="", sub_tracts=[]):
+        self.sub_tracts = sub_tracts
+        self.num_of_subt_on = 0
+        super().__init__(text)
+        # align left
+        self.setAlignment(Qt.AlignLeft)
+        # enlarge font
+        font = QFont()
+        font.setPointSize(12)
+        self.setFont(font)
+        # set OG style sheet
+        self.setStyleSheet("""
+                    QLabel {
+                        background-color: white;
+                    }
+                    QLabel:hover {
+                        background-color: lightblue;
+                    }
+                """)
+        self.mouseReleaseEvent = self.released
+        for button in self.sub_tracts:
+            button.off.connect(self.deactivate_self)
+            button.on.connect(self.group_handler)
+        # set toggle attribute
+        self.toggle = False
+
+    def activate(self):
+        # activates all buttons of the group
+        self.setStyleSheet("background-color: rgba(230, 216, 255, 1)")
+        for button in self.sub_tracts:
+            button.released()
+        self.num_of_subt_on = len(self.sub_tracts)
+
+    def deactivate(self):
+        # deactivates all the buttons of the group
+        self.setStyleSheet("""
+                                        QLabel {
+                                            background-color: white;
+                                        }
+                                        QLabel:hover {
+                                            background-color: lightblue;
+                                        }
+                                    """)
+        for button in self.sub_tracts:
+            button.released()
+        self.num_of_subt_on = 0
+
+    def group_handler(self):
+        # if I got an on, add 1 to num_of_subt and check if I it its equal to group size (ie all buttons are on)
+        self.num_of_subt_on += 1
+        if self.num_of_subt_on == len(self.sub_tracts):
+            self.setStyleSheet("background-color: rgba(230, 216, 255, 1)")
+            self.toggle = True
+
+    def deactivate_self(self):
+        if self.num_of_subt_on == len(self.sub_tracts):
+            self.setStyleSheet("""
+                                                            QLabel {
+                                                                background-color: white;
+                                                            }
+                                                            QLabel:hover {
+                                                                background-color: lightblue;
+                                                            }
+                                                        """)
+            self.toggle = False
+        # also, decrease number of active buttons by one
+        self.num_of_subt_on += -1
+
+    def released(self, event):
+        if self.num_of_subt_on == len(self.sub_tracts) or self.num_of_subt_on == 0:
+            # switch toggle
+            self.toggle = not self.toggle
+            if self.toggle:
+                self.activate()
+            else:
+                self.deactivate()
+        else:
+            # turn on the buttons which are not currently on
+            for button in self.sub_tracts:
+                if button.toggle is False:
+                    button.released()
+            self.toggle = True
 
 
 # we make a custom graphics view class in order to enable zooming
@@ -682,7 +771,7 @@ class CustomGraphicsView(QGraphicsView):
         super().__init__(scene)
 
     def wheelEvent(self, event):
-        # check if Ctrl is pressed
+        # check if ctrl is pressed
         if QApplication.keyboardModifiers() == Qt.ControlModifier:
             zoom_in_factor = 1.25
             zoom_out_factor = 0.8
@@ -692,11 +781,11 @@ class CustomGraphicsView(QGraphicsView):
             else:
                 self.scale(zoom_out_factor, zoom_out_factor)
         else:
-            # call the default scroll behavior if Ctrl is not pressed
+            # call the default scroll behavior if ctrl is not pressed
             super().wheelEvent(event)
 
 
-# lastly let's make a little color palette thing for the neurotransmitter
+# let's make a little color palette thing for the neurotransmitter
 class ColorPal(QWidget):
     def __init__(self):
         super().__init__()
@@ -751,19 +840,77 @@ class ColorPal(QWidget):
         self.setStyleSheet(f"background-color: {color.name()};")
 
 
+# finally, this class is created for dynamic text displaying, which is activated by hovering over areas in the map
+class ResizingTextLabel(QLabel):
+    def __init__(self, text):
+        super().__init__(text)
+        self.text_size = 12
+        self.default_text_size = self.text_size
+        self.font = QFont()
+        self.font.setPointSize(self.text_size)
+        self.initial_h = -1    # set initial height
+        self.scale_factor = 1    # set scale factor in order to control base text size (to reduce computational load)
+
+    def paintEvent(self, event):    # basically, it's a paint event which handles painting the text at appropriate size
+        if self.text():
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setFont(self.font)
+            # set initial font metrics to measure the bounding rectangle the current text will take with current font
+            font_metrics = QFontMetrics(self.font)
+            bounding_rect = font_metrics.boundingRect(self.rect(), Qt.TextWordWrap | Qt.AlignCenter, self.text())
+            # set the label's current space (rectangle)
+            rect = self.rect()
+            # a loop which adapts the font so the text will fit inside the labels space \ rectangle
+            while rect.height() < bounding_rect.height() and self.font.pointSize()>1:
+                self.text_size += math.copysign(0.2, self.height() - bounding_rect.height())
+                self.font.setPointSize(int(self.text_size))
+                painter.setFont(self.font)
+                font_metrics = QFontMetrics(self.font)
+                bounding_rect = font_metrics.boundingRect(self.rect(), Qt.TextWordWrap | Qt.AlignCenter,
+                                                          self.text())
+
+            painter.setFont(self.font)
+            painter.setPen(QPen(QColor(0, 0, 0)))
+            painter.drawText(self.rect(), Qt.TextWordWrap | Qt.AlignCenter, self.text())
+
+        else:
+            self.text_size = int(12*self.scale_factor)
+            self.font.setPointSize(self.text_size)
+            pass
+
+    def setText(self, text):
+        super().setText(text)
+        self.repaint()
+
+    def updateTextSize(self):    # this method is triggered by a signal which is emitted by main window resize events
+        # set original base_line
+        if self.initial_h == -1:
+            self.initial_h = self.height()
+        # scale
+        self.scale_factor = self.height()/self.initial_h
+        self.text_size = int(12 * self.scale_factor)
+        self.font.setPointSize(self.text_size)
+
+
 # DEFINE THE MAIN WINDOW
 class MainWindow(QMainWindow):
+    window_resize_signal = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle('brainmap9000')
         # define window's size
         self.setGeometry(300, 300, 400, 400)
+        # set icon
+        self.setWindowIcon(QIcon("icon\\icon.ico"))
         # TEXT DISPLAYER
-        self.text_disp = QLabel("")
-        self.text_disp.setAlignment(Qt.AlignCenter | Qt.AlignCenter)
-        font = QFont()
-        font.setPointSize(20)
-        self.text_disp.setFont(font)
+        self.text_disp = ResizingTextLabel("")
+        #self.text_disp = QLabel("")
+        self.text_disp.setFixedHeight(int(self.height()/15))
+        self.text_disp.setWordWrap(True)
+        # resizing signal
+        self.window_resize_signal.connect(self.text_disp.updateTextSize)
         # MAP
         g_scene = QGraphicsScene()
         pen = QPen(QColor(0, 0, 0))
@@ -788,12 +935,21 @@ class MainWindow(QMainWindow):
             g_scene.addItem(path_item)
         # draw arrows for tract buttons
         arrow_items_tract_buttons = []
-        for name, start, end, neuro_tr, line in lines:
-            g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr))
+        for edge, line in lines:
+            name = topG.edges[edge]['name']
+            start = f"{edge[0]}"
+            end = f"{edge[1]}"
+            neuro_tr = topG.edges[edge]['neuro_trs']
+            categories = topG.edges[edge]['categories']
+            g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr, categories))
             arrow_items_tract_buttons.append(g_scene.items()[0])
         # draw arrows for node buttons
         arrow_items = []
-        for name, start, end, neuro_tr, line in lines_of_area_buttons:
+        for edge, line in lines_of_area_buttons:
+            name = topG.edges[edge]['name']
+            start = f"{edge[0]}"
+            end = f"{edge[1]}"
+            neuro_tr = topG.edges[edge]['neuro_trs']
             g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr))
             arrow_items.append(g_scene.items()[0])
 
@@ -871,23 +1027,39 @@ class MainWindow(QMainWindow):
             for edge in outputs:
                 output_arrows.append(edges_arrows_dict[edge])
             the_area_buttons_frfr.append(LeftAlignedPressableLabel_area(node, topG.nodes[node]["region"], input_arrows, output_arrows))
-            #self.myMenu.addWidget(LeftAlignedPressableLabel_area(node, topG.nodes[node]["region"], input_arrows, output_arrows))
         # now load by alphabet
         for button in sorted(the_area_buttons_frfr, key=lambda x: x.text()):
             self.myMenu.addWidget(button)
         # add the buttons for the tracts
         # again let's alphabetize (honestly, not sure if this makes it less confusing)
         the_tract_buttons_frfr = []
-        for tract in tracts["tract name"]:
+        for tract in tracts['tract name']:
             if isinstance(tract, str):
                 tract_parts = []
                 for item in arrow_items_tract_buttons:
                     if isinstance(item, CustomArrowPathItem) and tract in item.name:  # if it's an arrow that is part of this tract
                         tract_parts.append(item)   # append to 'tract parts' each arrow of the tract
                 the_tract_buttons_frfr.append(LeftAlignedPressableLabel_tract(tract, tract_parts))
-                #self.myMenu2.addWidget(LeftAlignedPressableLabel_tract(tract, tract_parts))  # add the button of the tract to the tract menu
-        for button in sorted(the_tract_buttons_frfr, key=lambda x: x.text()):
-            self.myMenu2.addWidget(button)
+                # add the button of the tract to the tract menu
+        # alphabetize
+        the_tract_buttons_frfr = sorted(the_tract_buttons_frfr, key=lambda x: x.text())
+        # now add group buttons
+        for key in composite_paths.keys():
+            for item in the_tract_buttons_frfr:
+                try:
+                    if str(key[1]) in item.categories:
+                        composite_paths[key].append(item)
+                except AttributeError:
+                    continue
+            index = [x.text() for x in the_tract_buttons_frfr].index(key[0])
+            the_tract_buttons_frfr[index] = LeftAlignedPressableLabel_composite_tract(str(key[0]), composite_paths[key])
+
+        # finally, add the tract buttons
+        for button in the_tract_buttons_frfr:
+            if isinstance(button, LeftAlignedPressableLabel_tract) and button.region==[]:
+                print(f"will not include this empty button: {button.text()}")
+            else:
+                self.myMenu2.addWidget(button)
         # add a stretcher in order to keep the labels at minimal size
         self.myMenu.addStretch(1)
         self.myMenu2.addStretch(1)
@@ -922,6 +1094,8 @@ class MainWindow(QMainWindow):
         if self.tabs.isVisible():  # yes, it's weird
             self.tabs.setFixedWidth(self.one_fifth())
             self.scroll_area.setFixedWidth(self.one_fifth())
+        self.text_disp.setFixedHeight(int(self.height()/15))
+        self.window_resize_signal.emit()
 
     def hide_ns_palette(self, event):
         self.color_pal_inst.setVisible(False)
