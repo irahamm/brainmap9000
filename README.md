@@ -8,6 +8,8 @@ It is also possible to view all of the inputs and outputs of a given area (the a
 
 If you want to download the program in .exe form and run it on your PC you can do so using this link: https://drive.google.com/file/d/16pcwtbPw6XvilDHJw5O-1NC-SpTUnZS8/view?usp=sharing 
 
+Instructional video showing how to download and use the software- https://www.youtube.com/watch?v=X_t2G_2NYtw&ab_channel=brainmap9000
+
 Some of the figures (of regions) used in the map for this project are based on works that are either licensed with a Creative Commons license or considered as public domain.
 Attributions include:
 
