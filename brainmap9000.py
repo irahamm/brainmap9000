@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, QPointF, QLineF, QRectF, QSize, QVariantAnimation, pyqtSignal, QTimer
 import networkx as nx
 import pandas as pd
+import numpy as np
 import math
 import xml.etree.ElementTree as ET
 # First - License notice:
@@ -65,6 +66,8 @@ for i in range(len(areas)):   # this loop iterates over the nodes\brain areas an
         # anyhow de-update regions
         regions.pop()
 
+#topG.remove_node("")
+
 # create neurotransmitter palette. this will later determine the color of the arrow heads of each neurotransmitter.
 n_ts_palette = {
     'idk': QColor(0, 0, 0), 'GABA(-)': QColor(200, 0, 0),
@@ -88,47 +91,55 @@ for i, item in enumerate(tracts["beginning"]):
     if isinstance(item, str) and "#" in item:
         # I put it in an 'name, beginning'
         composite_paths[(tracts["tract name"][i], item.strip("#"))] = []
-# this loop iterates over the tracts file and adds the edges to the graph object
-for i in range(tracts.shape[0]):
-    j = 1
-    current_area = tracts["beginning"][i]
-    # add the edge
-    while isinstance(tracts[f"stop{j}"][i], str):
-        next_area = tracts[f"stop{j}"][i]
-        exit_loop = False
-        current_areas = current_area.split(r"\\")
-        next_areas = next_area.split(r"\\")  # split these stops into a list
-        if '@' in current_areas[-1]:
-            current_areas = current_areas[:-1] + current_areas[-1].split("@")
-            neuro_ts = current_areas[-1]
-            current_areas.remove(neuro_ts)
-        else:
-            neuro_ts = 'idk'
-        if '@' in next_areas[-1]:
-            next_areas = next_areas[:-1] + [next_areas[-1].split("@")[0]]
-        # detect and un-include any unreal nodes
-        invalid_nodes = [ar0 for ar0 in current_areas if ar0 not in topG.nodes] + [ar1 for ar1 in next_areas if ar1 not in topG.nodes]
-        current_areas = [ar0 for ar0 in current_areas if ar0 in topG.nodes]
-        next_areas = [ar1 for ar1 in next_areas if ar1 in topG.nodes]
-        # print the invalid nodes so that I know what to fix or add
-        print(f"invalid node\s:{invalid_nodes} in {tracts['tract name'][i]}") if invalid_nodes != [] else None
-        if len(current_areas) == 0:
-            exit_loop = True
-            break
-        elif len(next_areas) == 0:
-            exit_loop = True
-            break
-        if exit_loop:
-            break
-        categories = [cat for cat in tracts.loc[i, "category1":"category5"] if isinstance(cat, str)]
-        # else connect any current area with any next area
-        for ar0 in current_areas:
-            for ar1 in next_areas:
-                topG.add_edge(ar0, ar1, name=str(tracts["tract name"][i]) + f" ({j})", neuro_trs=neuro_ts,
-                              categories=categories)
-        # update current area
-        current_area = tracts[f"stop{j}"][i]
-        j += 1
+
+
+# the loop inside this function iterates over the tracts file and adds the edges to the graph object
+def df_to_edges(tracts):
+    for i in range(tracts.shape[0]):
+        j = 1
+        current_area = tracts["beginning"][i]
+        # add the edge
+        while isinstance(tracts[f"stop{j}"][i], str):
+            next_area = tracts[f"stop{j}"][i]
+            exit_loop = False
+            current_areas = current_area.split(r"\\")
+            next_areas = next_area.split(r"\\")  # split these stops into a list
+            if '@' in current_areas[-1]:
+                current_areas = current_areas[:-1] + current_areas[-1].split("@")
+                neuro_ts = current_areas[-1]
+                current_areas.remove(neuro_ts)
+            else:
+                neuro_ts = 'idk'
+            if '@' in next_areas[-1]:
+                next_areas = next_areas[:-1] + [next_areas[-1].split("@")[0]]
+            # detect and un-include any unreal nodes
+            invalid_nodes = [ar0 for ar0 in current_areas if ar0 not in topG.nodes] + [ar1 for ar1 in next_areas if
+                                                                                       ar1 not in topG.nodes]
+            current_areas = [ar0 for ar0 in current_areas if ar0 in topG.nodes]
+            next_areas = [ar1 for ar1 in next_areas if ar1 in topG.nodes]
+            # print the invalid nodes so that I know what to fix or add
+            print(f"invalid node\s:{invalid_nodes} in {tracts['tract name'][i]}") if invalid_nodes != [] else None
+            if len(current_areas) == 0:
+                exit_loop = True
+                break
+            elif len(next_areas) == 0:
+                exit_loop = True
+                break
+            if exit_loop:
+                break
+            categories = [cat for cat in tracts.loc[i, "category1":"category5"] if isinstance(cat, str)]
+            # else connect any current area with any next area
+            for ar0 in current_areas:
+                for ar1 in next_areas:
+                    topG.add_edge(ar0, ar1, name=str(tracts["tract name"][i]) + f" ({j})", neuro_trs=neuro_ts,
+                                  categories=categories)
+            # update current area
+            current_area = tracts[f"stop{j}"][i]
+            j += 1
+
+
+df_to_edges(tracts)  # run this function on our pathway data frame
+
 
 # LOAD THE VECTOR GRAPHIC PATHS (in order to enable hovering and other functionalities later on)
 def extract_svg_paths(svg_file):   # this function takes in and SVG file and extracts the paths of all labeled items
@@ -392,9 +403,11 @@ def find_meatiest_center(path: QPainterPath, num_of_subrecs: int) -> QPointF:
 
 # DETERMINING THE PATH CENTERS (I.E. THE COORDINATE IN WHICH OUTPUT ARROW WILL START AND INPUT ARROW WILL END)
 # first gather number of subpaths for each path
-# now gather the centers
+# now gather the centers (also gather the names of nodes which appear on the map for later use)
+nodes_on_map = []
 for name, path in painter_paths:
     if name in topG.nodes:
+        nodes_on_map.append(name)
         if len(path.toSubpathPolygons()) > 1:   # if the path has more than one sub polygon
             # choose the bigger polygon
             subpaths = []
@@ -840,7 +853,7 @@ class ColorPal(QWidget):
         self.setStyleSheet(f"background-color: {color.name()};")
 
 
-# finally, this class is created for dynamic text displaying, which is activated by hovering over areas in the map
+# this class is created for dynamic text displaying, which is activated by hovering over areas in the map
 class ResizingTextLabel(QLabel):
     def __init__(self, text):
         super().__init__(text)
@@ -892,6 +905,256 @@ class ResizingTextLabel(QLabel):
         self.text_size = int(12 * self.scale_factor)
         self.font.setPointSize(self.text_size)
 
+# good. we're done defining the classes of the main program. now we define the functions and classes needed for us
+# to be able to add tracts (i.e. for the 'tract adder' window to work)
+
+# define this word binder function according to our file's syntax
+def word_bind(words:list):
+    s = ""
+    for word in words:
+        s += word + r"\\"
+    s = s[:-2]
+    return s
+
+
+# this function check if the row the tract adder is trying to add is valid
+def valid_line_check(line):
+    # first two stops
+    if not isinstance(line[0], list) or not isinstance(line[1], list):
+        return False
+    # a case where we have an unfilled mid-stop
+    for i in range(2, len(line)-1):
+        if not isinstance(line[i], list) and isinstance(line[i+1], list):
+            return False
+    return True
+
+
+# another function which checks if the row that  the tract adder is trying to add is valid
+def valid_node_check(line, valid_words):
+    line = [x for x in line if not isinstance(x, type(np.nan))]
+    for lst in line:
+        for line_edit in lst:
+            if line_edit not in valid_words:
+                return False
+
+    return True
+
+
+class RestrictedLineEdit(QLineEdit):  # a special line edit which changes colors according to word validity
+    cleared = pyqtSignal()
+
+    def __init__(self, valid_words):
+        super().__init__()
+
+        self.valid_words = valid_words
+        self.completer = QCompleter(valid_words)
+        self.completer.setCaseSensitivity(False)  # Case-insensitive matching
+        self.completer.setFilterMode(Qt.MatchContains)
+        self.setCompleter(self.completer)
+
+        self.cleared.connect(self.reset_background)
+
+        # Connect the editingFinished signal to validation
+        self.editingFinished.connect(self.validate_input)
+
+    def validate_input(self):
+        current_text = self.text()
+        if current_text not in self.valid_words:
+            self.setStyleSheet("background-color: rgba(250, 0, 0, 0.5)")
+        else:
+            self.setStyleSheet("background-color: rgba(0, 250, 0, 0.5)")
+
+    def clear(self):
+        super().clear()
+        self.cleared.emit()
+
+    def reset_background(self):
+        self.setStyleSheet("background-color: white")
+
+
+class TractAdderStop(QWidget):  # a class for a "stop column" within the tract adder
+    def __init__(self, stop_num, valid_words):
+        super().__init__()
+
+        # initialize things
+        self.lyt = QVBoxLayout()
+        self.stop_num = stop_num
+        self.valid_words = valid_words
+        # place to write your stop
+        beginning = RestrictedLineEdit(self.valid_words)
+        beginning.setPlaceholderText(self.stop_num)
+        # button to add another stop
+        add_area_btn = QPushButton("+")
+        add_area_btn.setFixedSize(15, 15)
+        add_area_btn.clicked.connect(self.add_area)
+        # add the text taker and button to the layout and set it
+        self.lyt.addWidget(beginning)
+        self.lyt.addWidget(add_area_btn)
+        self.setLayout(self.lyt)
+
+    def add_area(self):
+        beginning = RestrictedLineEdit(self.valid_words)
+        beginning.setPlaceholderText(self.stop_num)
+        self.lyt.insertWidget(self.lyt.count()-1, beginning)
+
+
+class SuccessfulPathwayAdditionMsg(QDialog):  # popup window for a successful tract addition
+    def __init__(self, tract_name):
+        super().__init__()
+
+        self.setWindowTitle("invalid input")
+        self.setGeometry(150, 150, 300, 80)
+
+        label = QLabel(f"{tract_name} was added successfully")
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("background-color: rgba(0, 250, 0, 0.5)")
+        cont_layout = QVBoxLayout()
+        cont_layout.addWidget(label)
+        self.setLayout(cont_layout)
+
+
+class InvalidPathwayAdditionError(QDialog):   # popup window for an invalid tract
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("invalid input")
+        self.setGeometry(150, 150, 300, 80)
+
+        label = QLabel("invalid pathway input!")
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("background-color: rgba(250, 0, 0, 0.5)")
+        cont_layout = QVBoxLayout()
+        cont_layout.addWidget(label)
+        self.setLayout(cont_layout)
+
+
+class InvalidPathwayTitleError(QDialog):  # another popup window for an invalid tract
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("invalid title")
+        self.setGeometry(150, 150, 300, 80)
+
+        label = QLabel("invalid pathway name!")
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("background-color: rgba(250, 0, 0, 0.5)")
+        cont_layout = QVBoxLayout()
+        cont_layout.addWidget(label)
+        self.setLayout(cont_layout)
+
+
+class TractAdder(QDialog):  # the tract adder window
+    # we define a successful tract addition signal in order for the tract adder to be able to interact with the main
+    # window
+    TractAdded = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tract Adder")
+        self.setGeometry(150, 150, 600, 120)
+
+        # this index will be useful later on
+        self.beginning_col_i = tracts.columns.get_loc('beginning')
+
+        # the main layouts
+        self.title_layout = QHBoxLayout()
+        self.top_layout = QHBoxLayout()
+        self.bottom_layout = QHBoxLayout()
+        self.whole_layout = QVBoxLayout()
+        # first let's handle the tract title-
+        title_line_edit = QLineEdit()
+        title_line_edit.setPlaceholderText("tract name")
+        # each stop is in fact a vertical layout \ 'column'. look at the TractAdderStop class for more information
+        self.valid_words = nodes_on_map
+        bgn = TractAdderStop("beginning", self.valid_words)
+        stop1 = TractAdderStop("stop1", self.valid_words)
+        add_tract_btn = QPushButton("Add Tract")
+        add_tract_btn.clicked.connect(self.AddTractToPathwaysFile)
+        # create a "+" button
+        plus_btn = QPushButton("+")
+        plus_btn.clicked.connect(self.AnotherOne)
+        # set up layouts
+        self.title_layout.addWidget(title_line_edit)
+        self.title_layout.addStretch()
+        self.top_layout.addWidget(bgn)
+        self.top_layout.addWidget(stop1)
+        self.top_layout.addWidget(plus_btn)
+        self.bottom_layout.addStretch()
+        self.bottom_layout.addWidget(add_tract_btn)
+        title_container = QWidget()
+        top_container = QWidget()
+        bot_container = QWidget()
+        title_container.setLayout(self.title_layout)
+        top_container.setLayout(self.top_layout)
+        bot_container.setLayout(self.bottom_layout)
+        self.whole_layout.addWidget(title_container)
+        self.whole_layout.addWidget(top_container)
+        self.whole_layout.addWidget(bot_container)
+        self.setLayout(self.whole_layout)
+
+    def AnotherOne(self):  # this method adds a stop to the layout
+        if self.top_layout.count() == (len(tracts.columns) - self.beginning_col_i):
+            stop = TractAdderStop(f"stop{self.top_layout.count()-1}", self.valid_words)
+            self.top_layout.insertWidget(self.top_layout.count() - 1, stop)
+            btn = self.top_layout.itemAt(self.top_layout.count()-1).widget()
+            self.top_layout.removeWidget(btn)
+        else:
+            stop = TractAdderStop(f"stop{self.top_layout.count() - 1}", self.valid_words)
+            self.top_layout.insertWidget(self.top_layout.count() - 1, stop)
+
+    def AddTractToPathwaysFile(self):  # this method handles tract addition attempts
+        row = [np.nan]*(tracts.shape[1] - self.beginning_col_i)
+        clear_me = []
+        # get the row
+        for col_i in range(self.top_layout.count()):
+            if not isinstance(self.top_layout.itemAt(col_i).widget(), QPushButton):
+                col = self.top_layout.itemAt(col_i)
+                col = col.widget()
+                col = col.layout()
+                col_text = [col.itemAt(i).widget().text() for i in range(col.count() - 1)]
+                row[col_i] = col_text
+                # clear it
+                clear_me.append([col.itemAt(i).widget() for i in range(col.count() - 1)])
+        # turn spaces into nans
+        row = list(map(lambda x: np.nan if x == [''] else x, row))
+        # get the name of the tract
+        title = self.title_layout.itemAt(0).widget()
+        if title.text() == "":
+            self.invalid_title_error()
+        elif valid_line_check(row) and valid_node_check(row, self.valid_words):
+            r = tracts.shape[0]
+            tracts.loc[r] = [None] * len(tracts.columns)  # make a new row
+            for i, stopCol in enumerate(row):
+                if isinstance(stopCol, type(np.nan)):
+                    tracts.loc[r, tracts.columns[i + self.beginning_col_i]] = np.nan
+                else:
+                    tracts.loc[r, tracts.columns[i + self.beginning_col_i]] = word_bind(stopCol)
+            tracts['tract name'][r] = title.text()
+            tracts.to_csv("paths.csv", index=False)
+            # integrate the new tract into the software without having to restart using the signal we defined
+            self.TractAdded.emit()
+
+            # reset the line edit slots
+            self.valid_addition_msg(pthway_title=title.text())
+            title.clear()
+            for line_edit_list in clear_me:
+                for line_edit in line_edit_list:
+                    line_edit.clear()
+        else:
+            self.invalidinputerror()
+
+    def invalid_title_error(self):
+        dialog = InvalidPathwayTitleError()
+        dialog.exec()
+
+    def invalidinputerror(self):
+        dialog2 = InvalidPathwayAdditionError()
+        dialog2.exec()
+
+    def valid_addition_msg(self, pthway_title):
+        dialog3 = SuccessfulPathwayAdditionMsg(pthway_title)
+        dialog3.exec()
+
 
 # DEFINE THE MAIN WINDOW
 class MainWindow(QMainWindow):
@@ -912,7 +1175,7 @@ class MainWindow(QMainWindow):
         # resizing signal
         self.window_resize_signal.connect(self.text_disp.updateTextSize)
         # MAP
-        g_scene = QGraphicsScene()
+        self.g_scene = QGraphicsScene()
         pen = QPen(QColor(0, 0, 0))
         pen.setWidth(1)
         # load ze svg
@@ -923,7 +1186,7 @@ class MainWindow(QMainWindow):
         # This is important because until this is not figured out the project CANNOT generalize to any other map.
         '''
         svg_map.setScale(0.28225)
-        g_scene.addItem(svg_map)
+        self.g_scene.addItem(svg_map)
         # use the paths to create instance of our custom graphicsitem class
         self.path_items = []
         for name, path in painter_paths:
@@ -932,7 +1195,7 @@ class MainWindow(QMainWindow):
         for path_item in self.path_items:
             path_item.setPen(pen)
             path_item.setBrush(QColor(0, 0, 0, 0))
-            g_scene.addItem(path_item)
+            self.g_scene.addItem(path_item)
         # draw arrows for tract buttons
         arrow_items_tract_buttons = []
         for edge, line in lines:
@@ -941,8 +1204,8 @@ class MainWindow(QMainWindow):
             end = f"{edge[1]}"
             neuro_tr = topG.edges[edge]['neuro_trs']
             categories = topG.edges[edge]['categories']
-            g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr, categories))
-            arrow_items_tract_buttons.append(g_scene.items()[0])
+            self.g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr, categories))
+            arrow_items_tract_buttons.append(self.g_scene.items()[0])
         # draw arrows for node buttons
         arrow_items = []
         for edge, line in lines_of_area_buttons:
@@ -950,13 +1213,13 @@ class MainWindow(QMainWindow):
             start = f"{edge[0]}"
             end = f"{edge[1]}"
             neuro_tr = topG.edges[edge]['neuro_trs']
-            g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr))
-            arrow_items.append(g_scene.items()[0])
+            self.g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr))
+            arrow_items.append(self.g_scene.items()[0])
 
         # add color palette
         self.color_pal_inst = ColorPal()
         # put graphics scene in a graphics view
-        self.g_view = CustomGraphicsView(g_scene)
+        self.g_view = CustomGraphicsView(self.g_scene)
         # layout
         colpal_Image = QWidget()
         layout1 = QVBoxLayout(colpal_Image)
@@ -1030,8 +1293,7 @@ class MainWindow(QMainWindow):
         # now load by alphabet
         for button in sorted(the_area_buttons_frfr, key=lambda x: x.text()):
             self.myMenu.addWidget(button)
-        # add the buttons for the tracts
-        # again let's alphabetize (honestly, not sure if this makes it less confusing)
+        # create the buttons for the tracts
         the_tract_buttons_frfr = []
         for tract in tracts['tract name']:
             if isinstance(tract, str):
@@ -1040,10 +1302,9 @@ class MainWindow(QMainWindow):
                     if isinstance(item, CustomArrowPathItem) and tract in item.name:  # if it's an arrow that is part of this tract
                         tract_parts.append(item)   # append to 'tract parts' each arrow of the tract
                 the_tract_buttons_frfr.append(LeftAlignedPressableLabel_tract(tract, tract_parts))
-                # add the button of the tract to the tract menu
         # alphabetize
         the_tract_buttons_frfr = sorted(the_tract_buttons_frfr, key=lambda x: x.text())
-        # now add group buttons
+        # now add 'group buttons'
         for key in composite_paths.keys():
             for item in the_tract_buttons_frfr:
                 try:
@@ -1089,6 +1350,13 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(Bar_Buttons_Image)
 
+        # add the menu from which we can add a tract
+        file_menu = QMenu("File", self)
+        option1 = QAction("Add a Tract\Pathway", self)
+        file_menu.addAction(option1)
+        option1.triggered.connect(self.open_tract_adder)
+        self.menuBar().addMenu(file_menu)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.tabs.isVisible():  # yes, it's weird
@@ -1123,6 +1391,41 @@ class MainWindow(QMainWindow):
         # returns one fifth of window's current width
         # this might be retarded, but it works
         return int(self.width()/5)
+
+    def open_tract_adder(self):  # opens the tract adder window
+        self.dialog = TractAdder()
+        self.dialog.TractAdded.connect(self.add_tract_to_toolbar)
+        self.dialog.exec()
+
+    def add_tract_to_toolbar(self):
+        # translate last line (which was just added) to edges
+        df_to_edges(tracts.iloc[[-1]].reset_index(drop=True))
+        title = tracts.iloc[-1]['tract name']
+        arrows = []
+        for edg in topG.edges:  # make lines out of edges
+            if title in topG.edges[edg]['name']:
+                arrows.append((edg, QLineF(topG.nodes[edg[0]]['pos'][0], topG.nodes[edg[0]]['pos'][1],
+                                           topG.nodes[edg[1]]['pos'][0], topG.nodes[edg[1]]['pos'][1])))
+
+        for i in range(len(arrows)):  # make arrows out of lines
+            arrows[i] = (arrows[i][0], MyArrow(arrows[i][1].x1(), arrows[i][1].y1(), arrows[i][1].x2(), arrows[i][1].y2()))
+        arrow_items_for_tract_buttons = []
+        for edge, line in arrows:  # make CustomArrowPathItems out of arrows and add them to the g_scene
+            name = topG.edges[edge]['name']
+            start = f"{edge[0]}"
+            end = f"{edge[1]}"
+            neuro_tr = topG.edges[edge]['neuro_trs']
+            categories = topG.edges[edge]['categories']
+            self.g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr, categories))
+            arrow_items_for_tract_buttons.append(self.g_scene.items()[0])
+
+        tract_parts = []
+        for item in arrow_items_for_tract_buttons:
+            tract_parts.append(item)
+        # make a button and upgrade toolbar and searchbar
+        self.myMenu2.insertWidget(1, LeftAlignedPressableLabel_tract(title, tract_parts))
+        itm = self.myMenu2.itemAt(1).widget()
+        itm.setStyleSheet("background-color: rgba(0,250,0,0.4)")
 
 
 """
