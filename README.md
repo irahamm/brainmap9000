@@ -4,7 +4,7 @@ Welcome to 'brainmap9000'!
 
 The idea behind this project is to create one big, interactive, 2d figure containing the entire nervous system.
 Well known nerve pathways can be displayed on the figure (in the form of arrows) using the buttons on the left (the tract tab).
-It is also possible to view all of the inputs and outputs of a given area (the area tab).
+It is also possible to view all of the inputs and outputs of a given area (the area tab). You can also add your own pathways through the 'file' dropdown menu (top left corner).
 
 If you want to download the program in .exe form and run it on your PC you can do so using this link: https://drive.google.com/file/d/1c6LNqpvMjcYWy8sijtLdvXvCMhkq6bVW/view?usp=sharing
 
