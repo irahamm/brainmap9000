@@ -585,8 +585,9 @@ class CustomArrowPathItem(QGraphicsPathItem):      # class for the edges
         self.setBrush(self.pen2.color())
         self.label.setText(self.title)
 
+
 # FOR THE TOOLBAR ON THE LEFT OF THE APP, WE WANT TO MAKE SOME CUSTOM BUTTONS
-# custom QLabels that are aligned to the left - one class for arrows and one for areas
+# custom QLabels that are aligned to the left - one class for tracts and one for areas
 # ARROWS
 class LeftAlignedPressableLabel_tract(QLabel):
     # let's try to define a pyqt signal
@@ -692,6 +693,8 @@ class LeftAlignedPressableLabel_area(QLabel):
                                     background-color: lightblue;
                                 }
                             """)
+
+
 # A CLASS FOR TRACT BUTTONS WHICH ARE A GROUP OF EXISTING TRACT BUTTONS
 class LeftAlignedPressableLabel_composite_tract(QLabel):
     def __init__(self, text="", sub_tracts=[]):
@@ -1002,7 +1005,7 @@ class SuccessfulPathwayAdditionMsg(QDialog):  # popup window for a successful tr
     def __init__(self, tract_name):
         super().__init__()
 
-        self.setWindowTitle("invalid input")
+        self.setWindowTitle("valid input")
         self.setGeometry(150, 150, 300, 80)
 
         label = QLabel(f"{tract_name} was added successfully")
@@ -1154,6 +1157,99 @@ class TractAdder(QDialog):  # the tract adder window
     def valid_addition_msg(self, pthway_title):
         dialog3 = SuccessfulPathwayAdditionMsg(pthway_title)
         dialog3.exec()
+
+
+class SuccessfulPathwayRemovalMsg(QDialog):  # popup window for when a tract has been removed
+    def __init__(self, tract_name):
+        super().__init__()
+
+        self.setWindowTitle("invalid input")
+        self.setGeometry(150, 150, 300, 80)
+
+        label = QLabel(f"{tract_name} was removed")
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("background-color: rgba(250, 250, 0, 0.5)")
+        cont_layout = QVBoxLayout()
+        cont_layout.addWidget(label)
+        self.setLayout(cont_layout)
+
+
+class TractRemover(QDialog):  # the tract remover window
+    # we define a tract removal signal in order for the tract remover to be able to interact with the main
+    # window
+    TractRemoved = pyqtSignal(str)
+
+    def __init__(self, parent, valid_titles):
+        super().__init__(parent)
+        self.setWindowTitle("Tract Remover")
+        self.setGeometry(150, 150, 600, 120)
+
+        # this index will be useful later on
+        #self.beginning_col_i = tracts.columns.get_loc('beginning')
+
+        # init valid pathway titles
+        self.valid_titles = valid_titles
+        # the main layouts
+        self.title_layout = QHBoxLayout()
+        #self.top_layout = QHBoxLayout() (I left this in for the day i'll make the tract remover into a tract editor)
+        self.bottom_layout = QHBoxLayout()
+        self.whole_layout = QVBoxLayout()
+        # first let's handle the tract title-
+        #tract_titles = list(x for x in tracts['tract name'] if not isinstance(x, type(np.nan)))
+        #print(f"tract titles:{tract_titles}")
+        title_line_edit = RestrictedLineEdit(self.valid_titles)
+        title_line_edit.setPlaceholderText("tract name")
+        # each stop is in fact a vertical layout \ 'column'. look at the TractAdderStop class for more information
+        #self.valid_words = nodes_on_map
+        #bgn = TractAdderStop("beginning", self.valid_words)
+        #stop1 = TractAdderStop("stop1", self.valid_words)
+        remove_tract_btn = QPushButton("Remove Tract")
+        remove_tract_btn.clicked.connect(self.RemoveTractFromPathwaysFile)
+        # create a "+" button
+        #plus_btn = QPushButton("+")
+        #plus_btn.clicked.connect(self.AnotherOne)
+        # set up layouts
+        self.title_layout.addWidget(title_line_edit)
+        self.title_layout.addStretch()
+        #self.top_layout.addWidget(bgn)
+        #self.top_layout.addWidget(stop1)
+        #self.top_layout.addWidget(plus_btn)
+        self.bottom_layout.addStretch()
+        self.bottom_layout.addWidget(remove_tract_btn)
+        title_container = QWidget()
+        #top_container = QWidget()
+        bot_container = QWidget()
+        title_container.setLayout(self.title_layout)
+        #top_container.setLayout(self.top_layout)
+        bot_container.setLayout(self.bottom_layout)
+        self.whole_layout.addWidget(title_container)
+        #self.whole_layout.addWidget(top_container)
+        self.whole_layout.addWidget(bot_container)
+        self.setLayout(self.whole_layout)
+
+    def invalid_title_error(self):
+        dialog = InvalidPathwayTitleError()
+        dialog.exec()
+
+    def valid_removal_msg(self, pthway_title):
+        dialog3 = SuccessfulPathwayRemovalMsg(pthway_title)
+        dialog3.exec()
+
+    def RemoveTractFromPathwaysFile(self):  # this method handles tract removal attempts
+        title = self.title_layout.itemAt(0).widget()
+        # check if a valid title was entered
+        if title.text() not in self.valid_titles:
+            self.invalid_title_error()
+        else:
+            ind = tracts.index[tracts["tract name"] == title.text()].tolist()[0]
+            # remove the pathway from the file
+            tracts.drop(index=ind, inplace=True)
+            tracts.to_csv("paths.csv", index=False)
+            self.valid_removal_msg(pthway_title=title.text())
+            # remove the pathway from the toolbar
+            self.TractRemoved.emit(title.text())
+            # clear?
+            title.clear()
 
 
 # DEFINE THE MAIN WINDOW
@@ -1353,9 +1449,16 @@ class MainWindow(QMainWindow):
         # add the menu from which we can add a tract
         file_menu = QMenu("File", self)
         option1 = QAction("Add a Tract\Pathway", self)
+        option2 = QAction("Remove", self)
         file_menu.addAction(option1)
+        file_menu.addAction(option2)
         option1.triggered.connect(self.open_tract_adder)
+        option2.triggered.connect(self.open_tract_remover)
         self.menuBar().addMenu(file_menu)
+
+        # init dialog windows
+        self.dialog = TractAdder()
+        self.dialog2 = TractRemover(self, [x.text() for x in self.items2[1:-1]])
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1393,7 +1496,6 @@ class MainWindow(QMainWindow):
         return int(self.width()/5)
 
     def open_tract_adder(self):  # opens the tract adder window
-        self.dialog = TractAdder()
         self.dialog.TractAdded.connect(self.add_tract_to_toolbar)
         self.dialog.exec()
 
@@ -1426,6 +1528,42 @@ class MainWindow(QMainWindow):
         self.myMenu2.insertWidget(1, LeftAlignedPressableLabel_tract(title, tract_parts))
         itm = self.myMenu2.itemAt(1).widget()
         itm.setStyleSheet("background-color: rgba(0,250,0,0.4)")
+
+    def open_tract_remover(self):  # opens the tract adder window
+        self.dialog2.TractRemoved.connect(self.remove_tract_from_toolbar)
+        self.dialog2.exec()
+
+    def remove_tract_from_toolbar(self, title):
+        # remove label (title is stored in the signal)
+        for i in range(self.myMenu2.count()):
+            item = self.myMenu2.itemAt(i).widget()
+            if isinstance(item, LeftAlignedPressableLabel_tract):
+                if item.text()==title:
+                    self.myMenu2.removeWidget(item)
+                    self.items2.pop(i)
+                    break
+
+        '''
+        df_to_edges(tracts.iloc[[-1]].reset_index(drop=True))
+        title = tracts.iloc[-1]['tract name']
+        arrows = []
+        for edg in topG.edges:  # make lines out of edges
+            if title in topG.edges[edg]['name']:
+                arrows.append((edg, QLineF(topG.nodes[edg[0]]['pos'][0], topG.nodes[edg[0]]['pos'][1],
+                                           topG.nodes[edg[1]]['pos'][0], topG.nodes[edg[1]]['pos'][1])))
+
+        for i in range(len(arrows)):  # make arrows out of lines
+            arrows[i] = (arrows[i][0], MyArrow(arrows[i][1].x1(), arrows[i][1].y1(), arrows[i][1].x2(), arrows[i][1].y2()))
+        arrow_items_for_tract_buttons = []
+        for edge, line in arrows:  # make CustomArrowPathItems out of arrows and add them to the g_scene
+            name = topG.edges[edge]['name']
+            start = f"{edge[0]}"
+            end = f"{edge[1]}"
+            neuro_tr = topG.edges[edge]['neuro_trs']
+            categories = topG.edges[edge]['categories']
+            self.g_scene.addItem(CustomArrowPathItem(line, self.text_disp, name, start, end, neuro_tr, categories))
+            arrow_items_for_tract_buttons.append(self.g_scene.items()[0])
+        '''
 
 
 """
